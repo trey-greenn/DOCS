@@ -22,24 +22,20 @@ Reginald is a Financial Crime and Compliance AI Chatbot designed to streamline A
 **Stack:**
 - **Frontend:** React + Vite + Tailwind v4 + ShadCN UI
   - Modern component-based architecture with React 18's concurrent rendering
-  - Vite build system offering blazing-fast HMR and optimized production builds
-  - Latest Tailwind v4 for zero-runtime styling and improved developer experience
-  - ShadCN UI for accessible, customizable component primitives
+  - Vite build system offering optimized production builds
+  - Latest Tailwind v4
 
 - **Backend:** FastAPI (Python)
-  - Asynchronous Python framework with automatic OpenAPI documentation
-  - Type-hinted request/response validation using Pydantic models
-  - High performance with Starlette ASGI server underpinnings
+  - Asynchronous Python framework
   - Easy integration with Python data science and ML libraries
 
 - **AI Model:** Gemini API (messages streamed via Server-Sent Events)
   - Enterprise-grade LLM with financial compliance domain knowledge
   - Secure, tokenized API access with rate limiting capabilities
-  - Real-time streaming responses for natural conversation flow
+  - Real-time streaming responses for natural conversation 
   - Context-aware responses with multi-turn conversation history
 
 - **Shared:** Types, utilities, and configuration files
-  - TypeScript interfaces for cross-stack type safety
   - Environment configuration with validation
   - Shared constants and utility functions
 
@@ -47,13 +43,11 @@ Reginald is a Financial Crime and Compliance AI Chatbot designed to streamline A
   - JWT token-based authentication with refresh token rotation
   - Role-based access control for different user types
   - Session timeout and security headers implementation
-  - OWATP compliant security measures
 
 **Core Flow:**
 1. User logs in through secure authentication portal
 2. User lands on the dashboard with compliance case management overview
 3. Chat interface connects with Gemini API through encrypted backend proxy
-4. Replies are streamed word-by-word to simulate natural AI conversation with typing indicators
 
 ## 2. Architecture
 
@@ -289,23 +283,15 @@ shared/
 
 **Production Deployment:**
 
-- **Backend: Deploy on AWS/GCP/Azure or Dockerized FastAPI service**
-  - AWS: Elastic Beanstalk or ECS for containerized deployment
-  - GCP: Cloud Run for serverless container deployment
-  - Azure: App Service with container support
-  - Self-hosted: Docker Compose with Nginx reverse proxy
+- **Backend: HEROKU**
+  - HEROKU: containerized deployment
+  - Self-hosted: Localhost for development
 
-- **Frontend: Deploy on Vercel/Netlify or containerized with Nginx**
-  - Vercel: Zero-configuration deployment with preview environments
-  - Netlify: Automated builds with branch deploys
-  - AWS: S3 + CloudFront for static hosting with CDN
-  - Self-hosted: Nginx container serving optimized build
+  
 
-- **Database/Storage: (Pluggable – future)**
-  - PostgreSQL for relational data storage
-  - MongoDB for document-based storage
-  - Redis for caching and session management
-  - S3/GCS for file storage and attachments
+- **Database/Storage**
+  - MSSQL for relational data storage
+  - PineCone for document-based storage
 
 **CI/CD Recommendations:**
 - **Use GitHub Actions for testing + deployment**
@@ -314,11 +300,6 @@ shared/
   - Production deployment on main branch merges
   - Security scanning and vulnerability checks
 
-- **Dockerize both frontend and backend for scalability**
-  - Multi-stage builds for optimized containers
-  - Docker Compose for local development parity
-  - Kubernetes for production orchestration (optional)
-  - Health checks and graceful shutdown handling
 
 **Environment Management:**
 - Separate development, staging, and production environments
