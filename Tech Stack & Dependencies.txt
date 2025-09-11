@@ -1,154 +1,82 @@
-Tech Stack and Dependencies
-Frontend Technologies
-Technology	Version	Purpose	Key Features
-React	18.x	UI Framework	Concurrent rendering, Suspense, Server Components
-Vite	5.x	Build Tool	Fast HMR, optimized production builds, plugin ecosystem
-Tailwind CSS	4.x	Styling	Zero-runtime CSS, utility-first approach, responsive design
-ShadCN UI	2.x	Component Library	Accessible, customizable, theme-ready components
-TypeScript	5.x	Type Safety	Static typing, IDE integration, code predictability
-React Router	6.x	Routing	Dynamic routes, nested layouts, data loading
-React Query	5.x	Data Fetching	Server state management, caching, background updates
-ESLint/Prettier	latest	Code Quality	Consistent code style, error prevention
-Backend Technologies
-Technology	Version	Purpose	Key Features
-FastAPI	0.104.x	API Framework	Async support, auto-generated OpenAPI docs, Pydantic integration
-Python	3.11+	Server Language	Strong typing support, async/await, modern language features
-Pydantic	2.x	Data Validation	Schema definition, automatic validation, serialization
-Uvicorn	latest	ASGI Server	High-performance async server, WebSocket support
-Starlette	latest	ASGI Toolkit	Middleware support, background tasks, dependency injection
-PyJWT	latest	Authentication	JWT generation and verification
-httpx	latest	HTTP Client	Async HTTP requests to external services
-pytest	latest	Testing	Test automation, coverage reporting
-Infrastructure & DevOps
-Technology	Version	Purpose	Key Features
-Docker	latest	Containerization	Application packaging, consistent environments
-Docker Compose	latest	Local Development	Multi-container orchestration, development parity
-GitHub Actions	N/A	CI/CD	Automated testing, deployment pipelines
-Terraform	1.x	IaC	Infrastructure provisioning, configuration management
-AWS/GCP/Azure	N/A	Cloud Hosting	Scalable infrastructure, managed services
-NGINX	latest	Reverse Proxy	Load balancing, SSL termination, static file serving
-External API Dependencies
-Service	Integration Type	Purpose	Authentication Method
-Gemini API	REST + Streaming	AI Conversation	API Key + Request signing
-Auth0 (optional)	OAuth 2.0	Identity Provider	Client credentials flow
-S3/Cloud Storage	SDK	File Storage	IAM roles + access keys
-Sentry	SDK	Error Tracking	Project-based tokens
-DataDog	Agent	Monitoring	API keys + agent configuration
-Development Dependencies
-Apply to docs.txt
+# Tech Stack and Dependencies
+
+## Frontend Technologies
+
+| Technology | Version | Purpose | Key Features |
+|------------|---------|---------|-------------|
+| React | 18.x | UI Framework | Concurrent rendering, Suspense, Server Components |
+| Vite | 5.x | Build Tool | Fast HMR, optimized production builds, plugin ecosystem |
+| Tailwind CSS | 4.x | Styling | Zero-runtime CSS, utility-first approach, responsive design |
+| ShadCN UI | 2.x | Component Library | Accessible, customizable, theme-ready components |
+| TypeScript | 5.x | Type Safety | Static typing, IDE integration, code predictability |
+| React Router | 6.x | Routing | Dynamic routes, nested layouts, data loading |
+| React Query | 5.x | Data Fetching | Server state management, caching, background updates |
+| ESLint/Prettier | latest | Code Quality | Consistent code style, error prevention |
+
+## Backend Technologies
+
+| Technology | Version | Purpose | Key Features |
+|------------|---------|---------|-------------|
+| FastAPI | 0.104.x | API Framework | Async support, auto-generated OpenAPI docs, Pydantic integration |
+| Python | 3.11+ | Server Language | Strong typing support, async/await, modern language features |
+| Pydantic | 2.x | Data Validation | Schema definition, automatic validation, serialization |
+| Uvicorn | latest | ASGI Server | High-performance async server, WebSocket support |
+| Starlette | latest | ASGI Toolkit | Middleware support, background tasks, dependency injection |
+| PyJWT | latest | Authentication | JWT generation and verification |
+| httpx | latest | HTTP Client | Async HTTP requests to external services |
+| pytest | latest | Testing | Test automation, coverage reporting |
+
+## Infrastructure & DevOps
+
+| Technology | Version | Purpose | Key Features |
+|------------|---------|---------|-------------|
+| Docker | latest | Containerization | Application packaging, consistent environments |
+| Docker Compose | latest | Local Development | Multi-container orchestration, development parity |
+| GitHub Actions | N/A | CI/CD | Automated testing, deployment pipelines |
+| Terraform | 1.x | IaC | Infrastructure provisioning, configuration management |
+| AWS/GCP/Azure | N/A | Cloud Hosting | Scalable infrastructure, managed services |
+| NGINX | latest | Reverse Proxy | Load balancing, SSL termination, static file serving |
+
+## External API Dependencies
+
+| Service | Integration Type | Purpose | Authentication Method |
+|---------|-----------------|---------|----------------------|
+| Gemini API | REST + Streaming | AI Conversation | API Key + Request signing |
+| Auth0 (optional) | OAuth 2.0 | Identity Provider | Client credentials flow |
+| S3/Cloud Storage | SDK | File Storage | IAM roles + access keys |
+| Sentry | SDK | Error Tracking | Project-based tokens |
+| DataDog | Agent | Monitoring | API keys + agent configuration |
+
+## Development Dependencies
+
+### Root package.json
+```json
+{
+  "name": "reginald-v2",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && python -m uvicorn main:app --reload",
+    "build": "npm run build:frontend",
+    "build:frontend": "cd frontend && npm run build",
+    "lint": "npm run lint:frontend",
+    "lint:frontend": "cd frontend && npm run lint",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "cd frontend && npm run test",
+    "test:backend": "cd backend && pytest"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.0.0"
+  }
 }
-Apply to docs.txt
-0
-3. API Documentation
-Authentication API
-POST /api/auth/login
-Authenticates a user and returns JWT tokens.
-Request:
-Apply to docs.txt
-}
-Response:
-Apply to docs.txt
-}
-Status Codes:
-200: Success
-401: Invalid credentials
-422: Validation error
-POST /api/auth/refresh
-Refreshes an expired JWT using a refresh token.
-Request:
-Apply to docs.txt
-}
-Response: Same as login response
-Status Codes:
-200: Success
-401: Invalid refresh token
-422: Validation error
-Chat API
-POST /api/chat/send
-Sends a message to the AI assistant.
-Request:
-Apply to docs.txt
-}
-Response:
-Apply to docs.txt
-}
-Status Codes:
-202: Accepted for processing
-400: Bad request
-401: Unauthorized
-422: Validation error
-GET /api/chat/stream
-Streams AI response tokens via Server-Sent Events.
-Query Parameters:
-message_id: The ID of the message to stream
-SSE Events:
-token: Individual tokens from the AI response
-completed: Final message with complete response
-error: Error information if streaming fails
-Status Codes:
-200: Streaming started
-400: Invalid message ID
-401: Unauthorized
-Compliance API
-GET /api/compliance/regulations
-Retrieves relevant compliance regulations.
-Query Parameters:
-jurisdiction: Country/region code
-category: Regulation category
-search: Search term
-Response:
-Apply to docs.txt
-}
-POST /api/compliance/case/analyze
-Analyzes case data for compliance risks.
-Request:
-Apply to docs.txt
-}
-Response:
-Apply to docs.txt
-}
-User API
-GET /api/users/me
-Retrieves the current user's profile.
-Response:
-Apply to docs.txt
-}
-PATCH /api/users/me
-Updates user preferences or profile information.
-Request:
-Apply to docs.txt
-}
-Response:
-Apply to docs.txt
-}
-Admin API
-GET /api/admin/users
-Admin-only endpoint to list all users.
-Query Parameters:
-page: Page number
-page_size: Items per page
-role: Filter by role
-search: Search term
-Response:
-Apply to docs.txt
-}
-POST /api/admin/users
-Admin-only endpoint to create a new user.
-Request:
-Apply to docs.txt
-}
-Response:
-Apply to docs.txt
-}
-API Error Responses
-All API endpoints use a consistent error response format:
-Apply to docs.txt
-}
-Common error codes:
-authentication_failed: Invalid credentials
-token_expired: JWT has expired
-permission_denied: Insufficient permissions
-validation_error: Request data validation failed
-resource_not_found: Requested resource doesn't exist
-rate_limit_exceeded: Too many requests
-internal_error: Unhandled server error
+```
+
+### Backend Requirements
