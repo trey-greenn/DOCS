@@ -1,1 +1,724 @@
+Here are all of our API calls:
 
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from typing import List
+import os
+import json
+from pathlib import Path
+from datetime import timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Import auth modules
+from models import User, UserCreate, Token, LoginRequest, Chat, ChatCreate, Message, MessageCreate, ChatResponse, Document, DocumentCreate, CanvasReport, CanvasReportCreate, CanvasReportUpdate, ResearchRequest, ResearchArtifact, ActimizeRequest
+from auth import authenticate_user, create_access_token, get_current_active_user, ACCESS_TOKEN_EXPIRE_MINUTES
+from database import (create_user, get_user_by_username, create_chat, get_user_chats, add_message, 
+                      get_chat_messages, delete_chat, create_document, get_user_documents, 
+                      update_document_content, delete_document, create_canvas_report, 
+                      update_canvas_report, get_user_canvas_reports, create_research_artifact,
+                      update_research_artifact, get_user_research_artifacts, get_research_artifact)
+from chat_service import generate_chat_response, generate_chat_title, get_chat_response_sync
+from document_service import save_uploaded_file, extract_text_from_pdf, validate_pdf_file, delete_file
+from rag_service import store_document_embeddings, delete_document_embeddings
+from deep_research import research_service
+from actimize_service import actimize_service
+
+app = FastAPI()
+
+# Environment-based configuration
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+FRONTEND_DIST_PATH = Path(__file__).parent.parent / "frontend" / "dist"
+
+# Development: CORS for separate frontend server
+if ENVIRONMENT == "development":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# Production: Serve built frontend static files
+if ENVIRONMENT == "production" and FRONTEND_DIST_PATH.exists():
+    # Mount static assets
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_PATH / "assets"), name="static")
+    
+    # Serve favicon and other root static files
+    @app.get("/favicon.ico")
+    async def favicon():
+        return FileResponse(FRONTEND_DIST_PATH / "favicon.ico")
+    
+    @app.get("/vite.svg")
+    async def vite_svg():
+        return FileResponse(FRONTEND_DIST_PATH / "vite.svg")
+
+
+# Root route: serve frontend in production, API message in development
+@app.get("/")
+async def root():
+    if ENVIRONMENT == "production" and FRONTEND_DIST_PATH.exists():
+        index_file = FRONTEND_DIST_PATH / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        else:
+            return {"error": "Frontend not built. Run: npm run build:frontend"}
+    else:
+        return {"message": "Hello from FastAPI!"}
+
+
+# Authentication endpoints
+@app.post("/api/auth/register", response_model=User)
+async def register(user: UserCreate):
+    """Register a new user"""
+    try:
+        db_user = create_user(user)
+        return User(
+            id=db_user.id,
+            username=db_user.username,
+            email=db_user.email,
+            is_active=db_user.is_active,
+            created_at=db_user.created_at
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login user and return JWT token"""
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.get("/api/auth/me", response_model=User)
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
+    """Get current user information"""
+    return current_user
+
+
+
+
+
+# Chat endpoints
+@app.post("/api/chats", response_model=Chat)
+async def create_new_chat(
+    chat_data: ChatCreate,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a new chat"""
+    chat_id = create_chat(current_user.id, chat_data.title)
+    if chat_id:
+        chats = get_user_chats(current_user.id)
+        for chat in chats:
+            if chat["id"] == chat_id:
+                return Chat(**chat)
+    raise HTTPException(status_code=500, detail="Failed to create chat")
+
+
+@app.get("/api/chats", response_model=List[Chat])
+async def get_chats(current_user: User = Depends(get_current_active_user)):
+    """Get all chats for the current user"""
+    chats = get_user_chats(current_user.id)
+    return [Chat(**chat) for chat in chats]
+
+
+@app.get("/api/chats/{chat_id}/messages", response_model=List[Message])
+async def get_messages(
+    chat_id: int,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all messages for a specific chat"""
+    # Verify chat belongs to user
+    user_chats = get_user_chats(current_user.id)
+    chat_ids = [chat["id"] for chat in user_chats]
+    
+    if chat_id not in chat_ids:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    messages = get_chat_messages(chat_id)
+    return [Message(**msg) for msg in messages]
+
+
+@app.post("/api/chats/{chat_id}/messages")
+async def send_message(
+    chat_id: int,
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Send a message and get AI response"""
+    # Verify chat belongs to user
+    user_chats = get_user_chats(current_user.id)
+    chat_ids = [chat["id"] for chat in user_chats]
+    
+    if chat_id not in chat_ids:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Add user message
+    if not add_message(chat_id, "user", message_data.content):
+        raise HTTPException(status_code=500, detail="Failed to save message")
+    
+    # Get chat history for context
+    messages = get_chat_messages(chat_id)
+    conversation = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+    
+    # Generate AI response
+    try:
+        ai_response = await get_chat_response_sync(conversation)
+        
+        # Save AI response
+        if not add_message(chat_id, "assistant", ai_response):
+            raise HTTPException(status_code=500, detail="Failed to save AI response")
+        
+        return {"success": True, "message": "Message sent successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
+
+
+@app.get("/api/test/stream")
+async def test_streaming():
+    """Test endpoint to verify streaming works with mock data"""
+    async def generate_test_stream():
+        import asyncio
+        test_message = "This is a test streaming message that will be sent word by word to verify real-time streaming functionality."
+        words = test_message.split()
+        
+        for i, word in enumerate(words):
+            await asyncio.sleep(0.2)  # 200ms delay between words
+            yield f"data: {json.dumps({'content': word + ' ', 'done': False})}\n\n"
+        
+        yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+    
+    return StreamingResponse(
+        generate_test_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+        }
+    )
+
+
+@app.post("/api/chats/{chat_id}/messages/stream")
+async def send_message_stream(
+    chat_id: int,
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Send a message and get streaming AI response"""
+    # Verify chat belongs to user
+    user_chats = get_user_chats(current_user.id)
+    chat_ids = [chat["id"] for chat in user_chats]
+    
+    if chat_id not in chat_ids:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Add user message
+    if not add_message(chat_id, "user", message_data.content):
+        raise HTTPException(status_code=500, detail="Failed to save message")
+    
+    # Get chat history for context
+    messages = get_chat_messages(chat_id)
+    conversation = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+    
+    async def generate_response():
+        full_response = ""
+        try:
+            print(f"[STREAMING] Starting stream for chat {chat_id}")
+            chunk_count = 0
+            async for chunk in generate_chat_response(conversation, user_id=current_user.id):
+                chunk_count += 1
+                full_response += chunk
+                # Send data in SSE format with explicit flush
+                sse_data = f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                print(f"[STREAMING] Sending chunk {chunk_count}: {len(chunk)} chars")
+                yield sse_data
+            
+            print(f"[STREAMING] Stream complete. Total chunks: {chunk_count}, Total chars: {len(full_response)}")
+            
+            # Save the complete AI response
+            if full_response:
+                add_message(chat_id, "assistant", full_response)
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[STREAMING] Error: {error_msg}")
+            yield f"data: {json.dumps({'error': error_msg, 'done': True})}\n\n"
+    
+    return StreamingResponse(
+        generate_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Transfer-Encoding": "chunked",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+        }
+    )
+
+
+@app.delete("/api/chats/{chat_id}")
+async def delete_chat_endpoint(
+    chat_id: int,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Delete a chat"""
+    if delete_chat(chat_id, current_user.id):
+        return {"success": True, "message": "Chat deleted successfully"}
+    else:
+        raise HTTPException(status_code=404, detail="Chat not found or access denied")
+
+
+# Document endpoints
+@app.post("/api/documents/upload", response_model=Document)
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Upload a PDF document"""
+    # Validate file type
+    if not file.content_type == "application/pdf":
+        raise HTTPException(
+            status_code=400, 
+            detail="Only PDF files are allowed"
+        )
+    
+    # Check file size (limit to 10MB)
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="File size must be less than 10MB"
+        )
+    
+    # Validate PDF structure
+    if not validate_pdf_file(content):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid PDF file"
+        )
+    
+    try:
+        # Save file to disk
+        filename, file_path = await save_uploaded_file(content, file.filename)
+        
+        # Extract text content
+        extracted_text = extract_text_from_pdf(file_path)
+        
+        # Create document record
+        document_id = create_document(
+            user_id=current_user.id,
+            filename=filename,
+            original_filename=file.filename,
+            file_path=file_path,
+            file_size=len(content),
+            mime_type=file.content_type,
+            content_text=extracted_text
+        )
+        
+        if not document_id:
+            # Clean up file if database insertion failed
+            delete_file(file_path)
+            raise HTTPException(status_code=500, detail="Failed to save document")
+        
+        # Mark as processed if text extraction was successful
+        if extracted_text:
+            update_document_content(document_id, extracted_text)
+            
+            # Generate and store embeddings for RAG
+            try:
+                metadata = {
+                    "filename": file.filename,
+                    "user_id": current_user.id,
+                    "file_size": len(content)
+                }
+                store_document_embeddings(document_id, extracted_text, metadata)
+            except Exception as e:
+                print(f"Warning: Failed to generate embeddings: {e}")
+        
+        # Return document info
+        from datetime import datetime
+        return Document(
+            id=document_id,
+            user_id=current_user.id,
+            filename=filename,
+            original_filename=file.filename,
+            file_path=file_path,
+            file_size=len(content),
+            mime_type=file.content_type,
+            content_text=extracted_text,
+            processed=bool(extracted_text),
+            created_at=datetime.utcnow()
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@app.get("/api/documents", response_model=List[Document])
+async def get_documents(current_user: User = Depends(get_current_active_user)):
+    """Get all documents for the current user"""
+    documents = get_user_documents(current_user.id)
+    return [Document(**doc) for doc in documents]
+
+
+@app.delete("/api/documents/{document_id}")
+async def delete_document_endpoint(
+    document_id: int,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Delete a document"""
+    # Get document info first to delete file
+    documents = get_user_documents(current_user.id)
+    document = next((doc for doc in documents if doc["id"] == document_id), None)
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Delete from database
+    if delete_document(document_id, current_user.id):
+        # Delete file from disk
+        delete_file(document["file_path"])
+        # Delete embeddings
+        try:
+            delete_document_embeddings(document_id)
+        except Exception as e:
+            print(f"Warning: Failed to delete embeddings: {e}")
+        return {"success": True, "message": "Document deleted successfully"}
+    else:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+
+
+# Canvas report endpoints
+@app.post("/api/canvas-reports", response_model=CanvasReport)
+async def create_canvas_report_endpoint(
+    report_data: CanvasReportCreate,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Create a new canvas report"""
+    report_id = create_canvas_report(
+        user_id=current_user.id,
+        title=report_data.title,
+        markdown_content=report_data.markdown_content,
+        chat_id=report_data.chat_id
+    )
+    
+    if not report_id:
+        raise HTTPException(status_code=500, detail="Failed to create canvas report")
+    
+    from datetime import datetime
+    return CanvasReport(
+        id=report_id,
+        user_id=current_user.id,
+        chat_id=report_data.chat_id,
+        title=report_data.title,
+        markdown_content=report_data.markdown_content,
+        is_active=True,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+
+
+@app.get("/api/canvas-reports", response_model=List[CanvasReport])
+async def get_canvas_reports(current_user: User = Depends(get_current_active_user)):
+    """Get all canvas reports for the current user"""
+    reports = get_user_canvas_reports(current_user.id)
+    return [CanvasReport(**report) for report in reports]
+
+
+@app.put("/api/canvas-reports/{report_id}", response_model=CanvasReport)
+async def update_canvas_report_endpoint(
+    report_id: int,
+    report_data: CanvasReportUpdate,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update a canvas report"""
+    success = update_canvas_report(
+        report_id=report_id,
+        user_id=current_user.id,
+        title=report_data.title,
+        markdown_content=report_data.markdown_content
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Canvas report not found or access denied")
+    
+    # Get updated report
+    reports = get_user_canvas_reports(current_user.id)
+    updated_report = next((report for report in reports if report["id"] == report_id), None)
+    
+    if not updated_report:
+        raise HTTPException(status_code=404, detail="Updated report not found")
+    
+    return CanvasReport(**updated_report)
+
+
+@app.post("/api/canvas-reports/{report_id}/export-pdf")
+async def export_canvas_report_pdf(
+    report_id: int,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export canvas report as PDF"""
+    # Get the report
+    reports = get_user_canvas_reports(current_user.id)
+    report = next((r for r in reports if r["id"] == report_id), None)
+    
+    if not report:
+        raise HTTPException(status_code=404, detail="Canvas report not found")
+    
+    try:
+        # For now, return a simple response - PDF generation would be implemented here
+        # In production, you'd use libraries like weasyprint, reportlab, or similar
+        raise HTTPException(
+            status_code=501, 
+            detail="PDF export functionality will be implemented with proper PDF generation library"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF export failed: {str(e)}")
+
+
+# Deep Research endpoint
+@app.post("/api/research/stream")
+async def conduct_research_stream(
+    research_request: ResearchRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Start a streaming deep research process"""
+    
+    # Create research artifact in database
+    artifact_id = create_research_artifact(
+        user_id=current_user.id,
+        query=research_request.query,
+        chat_id=None  # We can add chat_id later if needed
+    )
+    
+    async def generate_research_stream():
+        try:
+            print(f"[RESEARCH] Starting deep research for user {current_user.id}: {research_request.query}")
+            
+            async for update in research_service.conduct_research_stream(research_request.query):
+                # Update database based on research progress
+                if update['type'] == 'plan_generated':
+                    # Save search plan to database
+                    search_plan_json = json.dumps(update.get('search_plan', []))
+                    update_research_artifact(
+                        artifact_id=artifact_id,
+                        search_plan=search_plan_json,
+                        status='searching'
+                    )
+                
+                elif update['type'] == 'report_complete':
+                    # Save final results to database
+                    final_results = update.get('results', {})
+                    search_results_json = json.dumps(final_results.get('search_results', []))
+                    follow_up_json = json.dumps(final_results.get('follow_up_questions', []))
+                    
+                    update_research_artifact(
+                        artifact_id=artifact_id,
+                        search_results=search_results_json,
+                        final_report=final_results.get('markdown_report'),
+                        short_summary=final_results.get('short_summary'),
+                        follow_up_questions=follow_up_json,
+                        status='complete'
+                    )
+                
+                elif update['type'] == 'error':
+                    # Mark as error in database
+                    update_research_artifact(
+                        artifact_id=artifact_id,
+                        status='error'
+                    )
+                
+                # Send data in SSE format
+                sse_data = f"data: {json.dumps(update)}\n\n"
+                print(f"[RESEARCH] Sending update: {update['type']} - {update['message']}")
+                yield sse_data
+            
+            print(f"[RESEARCH] Deep research completed for user {current_user.id}")
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[RESEARCH] Error: {error_msg}")
+            
+            # Mark as error in database
+            update_research_artifact(
+                artifact_id=artifact_id,
+                status='error'
+            )
+            
+            error_update = {
+                "type": "error",
+                "step": "error",
+                "message": f"Research failed: {error_msg}",
+                "error": error_msg,
+                "progress": 0
+            }
+            yield f"data: {json.dumps(error_update)}\n\n"
+    
+    return StreamingResponse(
+        generate_research_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+        }
+    )
+
+
+# Research artifacts endpoints
+@app.get("/api/research/artifacts", response_model=List[ResearchArtifact])
+async def get_research_artifacts(current_user: User = Depends(get_current_active_user)):
+    """Get all research artifacts for the current user"""
+    artifacts = get_user_research_artifacts(current_user.id)
+    return [ResearchArtifact(**artifact) for artifact in artifacts]
+
+
+@app.get("/api/research/artifacts/{artifact_id}", response_model=ResearchArtifact)
+async def get_research_artifact_by_id(
+    artifact_id: int,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get a specific research artifact"""
+    artifact = get_research_artifact(artifact_id)
+    
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Research artifact not found")
+    
+    # Verify ownership
+    if artifact["user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return ResearchArtifact(**artifact)
+
+
+# Actimize endpoints
+@app.post("/api/actimize/stream")
+async def actimize_query_stream(
+    actimize_request: ActimizeRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Stream Actimize database query results with chat history context"""
+    
+    async def generate_actimize_stream():
+        try:
+            print(f"[ACTIMIZE] Starting query for user {current_user.id}: {actimize_request.query}")
+            
+            # Get chat history if chat_id is provided
+            chat_history = []
+            if actimize_request.chat_id:
+                try:
+                    # Verify chat belongs to user
+                    user_chats = get_user_chats(current_user.id)
+                    chat_ids = [chat["id"] for chat in user_chats]
+                    
+                    if actimize_request.chat_id in chat_ids:
+                        messages = get_chat_messages(actimize_request.chat_id)
+                        # Get recent conversation context (last 10 messages)
+                        recent_messages = messages[-10:] if len(messages) > 10 else messages
+                        chat_history = [{"role": msg["role"], "content": msg["content"]} for msg in recent_messages]
+                        print(f"[ACTIMIZE] Using chat history with {len(chat_history)} messages")
+                    else:
+                        print(f"[ACTIMIZE] Invalid chat_id {actimize_request.chat_id} for user {current_user.id}")
+                except Exception as e:
+                    print(f"[ACTIMIZE] Error retrieving chat history: {e}")
+            
+            async for update in actimize_service.process_query_stream(actimize_request.query, chat_history):
+                # Send data in SSE format
+                sse_data = f"data: {json.dumps(update)}\n\n"
+                print(f"[ACTIMIZE] Sending update: {update['type']} - {update.get('message', 'No message')}")
+                yield sse_data
+            
+            print(f"[ACTIMIZE] Query completed for user {current_user.id}")
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[ACTIMIZE] Error: {error_msg}")
+            
+            error_update = {
+                "type": "error",
+                "message": f"Actimize query failed: {error_msg}",
+                "error": error_msg
+            }
+            yield f"data: {json.dumps(error_update)}\n\n"
+    
+    return StreamingResponse(
+        generate_actimize_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+        }
+    )
+
+
+# Production: Catch-all route to serve React app (must be last)
+if ENVIRONMENT == "production" and FRONTEND_DIST_PATH.exists():
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str):
+        # If it's an API route, let FastAPI handle it normally
+        if path.startswith("api/"):
+            return {"error": "API endpoint not found"}
+        
+        # For all other routes, serve the React app
+        index_file = FRONTEND_DIST_PATH / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        else:
+            return {"error": "Frontend not built. Run: npm run build:frontend"}
