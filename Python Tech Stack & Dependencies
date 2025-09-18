@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic[email]
+python-jose[cryptography]
+passlib[bcrypt]
+openai
+python-dotenv
+google-genai
+PyPDF2
+pinecone
+aiofiles
+openai-agents
