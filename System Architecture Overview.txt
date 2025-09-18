@@ -1,77 +1,19 @@
-┌─────────────────────────────────────────────────────────────────┐
-│                     Client Application Layer                     │
-│                                                                 │
-│  ┌───────────────┐  ┌────────────────┐  ┌──────────────────┐   │
-│  │ Authentication│  │   Dashboard    │  │  Chat Interface  │   │
-│  └───────┬───────┘  └────────┬───────┘  └────────┬─────────┘   │
-└─────────┼────────────────────┼────────────────────┼─────────────┘
-          │                    │                    │
-          ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        API Gateway Layer                         │
-│                                                                 │
-│  ┌───────────────┐  ┌────────────────┐  ┌──────────────────┐   │
-│  │  Auth Service │  │ Analytics API  │  │    Chat API      │   │
-│  └───────┬───────┘  └────────┬───────┘  └────────┬─────────┘   │
-└─────────┼────────────────────┼────────────────────┼─────────────┘
-          │                    │                    │
-          ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       Application Layer                          │
-│                                                                 │
-│  ┌───────────────┐  ┌────────────────┐  ┌──────────────────┐   │
-│  │ User Manager  │  │ Compliance Core│  │   AI Manager     │   │
-│  └───────┬───────┘  └────────┬───────┘  └────────┬─────────┘   │
-└─────────┼────────────────────┼────────────────────┼─────────────┘
-          │                    │                    │
-          ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Integration Layer                         │
-│                                                                 │
-│  ┌───────────────┐  ┌────────────────┐  ┌──────────────────┐   │
-│  │ Database      │  │ External APIs  │  │   Gemini API     │   │
-│  └───────────────┘  └────────────────┘  └──────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    U[User] --> F[Frontend - React + Vite + ShadCN UI]
+    F -->|Login / Dashboard / Chat UI| B[Backend - FastAPI]
+    B -->|Auth & API Routes| DB[(Shared Modules)]
+    B -->|Stream Responses (SSE)| G[Gemini API]
 
+    subgraph Frontend
+      F
+    end
 
-I'll create three comprehensive API documents based on the Reginald v2 technical documentation.
-1. System Architecture Overview
-Apply to docs.txt
-──────────────────────────────────────────────────┘
-Core Architecture Principles
-Microservices-Based Design
-Decoupled services for authentication, chat processing, and compliance functions
-Independent scaling and deployment for each service
-Fault isolation preventing cascade failures
-Layered Architecture
-Presentation Layer: React-based frontend with ShadCN UI components
-API Gateway: FastAPI-based RESTful endpoints with SSE support
-Application Layer: Core business logic and domain services
-Integration Layer: External system connections and data persistence
-Security-First Approach
-All communications encrypted with TLS 1.3
-JWT-based authentication with token rotation
-Rate limiting and request validation at API gateway
-Secrets management with secure vaults
-Real-Time Data Flow
-Frontend to Backend: Standard RESTful API calls with JWT authentication
-AI Responses: Server-Sent Events for real-time streaming
-Persistence: Asynchronous write operations for performance
-Horizontal Scalability
-Stateless API design enabling multiple instances
-Containerized deployment for dynamic scaling
-Load balancing across service instances
-Session affinity maintained through distributed caching
-Data Flow Patterns
-Authentication Flow
-Client submits credentials → Validation → JWT generation → Client stores token
-Subsequent requests include JWT in Authorization header
-Refresh token mechanism for session persistence
-Chat Interaction Flow
-User message → Input validation → Context assembly → Gemini API request
-SSE connection established → Token streaming → Frontend rendering
-Message persistence for history and compliance
-Compliance Operations Flow
-Case data retrieval → Rule application → Risk scoring → Recommendation generation
-Document analysis through AI processing
-Audit logging of all compliance decisions
+    subgraph Backend
+      B
+      DB
+    end
+
+    subgraph External Services
+      G
+    end
