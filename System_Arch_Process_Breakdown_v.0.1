@@ -1,0 +1,70 @@
+
+User enters credentials → frontend sends to backend → backend calls Firebase Auth → validates email, password, and IP.
+
+If authenticated, backend issues JWT token → stored in cookies → used for subsequent requests.
+
+On login, system checks cookies and session tokens → restores chat history from MSSQL database.
+
+Dashboard loads with user profile → pulls last 5 chats from MSSQL.
+
+User enters a new query → frontend sends message to backend via REST API.
+
+Backend validates chat ownership → ensures user_id matches chat record in MSSQL.
+
+Message stored in MSSQL messages table with timestamp and metadata.
+
+Backend fetches entire conversation history for that chat → builds context payload.
+
+Context sent to Gemini API through backend proxy (API keys never exposed to frontend).
+
+Gemini begins generating response → backend relays chunks using Server-Sent Events (SSE).
+
+Frontend progressively renders each chunk → user sees words stream in real time.
+
+Final response stored in MSSQL linked to the user’s chat ID.
+
+User can revisit dashboard → chat history retrieved by joining users + chats + messages tables in MSSQL.
+
+Queries about open cases → backend executes MSSQL query: SELECT TOP 5 * FROM cases WHERE status='open' ORDER BY created_at DESC.
+
+Results are streamed back through the chatbot interface → displayed as structured messages.
+
+Uploading a document (PDF) → frontend sends file to backend.
+
+Backend validates file type and size → parses with PDF extractor.
+
+Extracted text stored in MSSQL along with metadata (filename, user_id, size).
+
+Text embeddings generated → stored for retrieval-based queries.
+
+User later queries about uploaded documents → backend retrieves embeddings → performs semantic search → returns matching paragraphs.
+
+Canvas or reports requested → backend compiles data (chat summaries, case reports) → generates report object.
+
+Reports stored in MSSQL → linked to user → retrievable on dashboard.
+
+Audit log automatically updated for every major event (login, query, file upload, report generation).
+
+Compliance checks logged separately → stored for regulators or internal review.
+
+Heroku deployment → dynos handle scaling → logs stored centrally → error monitoring through add-ons.
+
+Environment variables stored in Heroku config vars → control secrets like Gemini API keys, MSSQL connection strings, Firebase keys.
+
+On deployment, GitHub Actions build pipeline runs → tests backend and frontend → deploys to Heroku.
+
+Shared modules ensure type safety between frontend and backend (schemas for chats, messages, users).
+
+Errors handled gracefully → if Gemini API fails, backend responds with fallback error message.
+
+If database connection fails, backend retries with exponential backoff → logs error for debugging.
+
+Security layer checks every request → invalid JWT or expired token triggers HTTP 401 Unauthorized.
+
+Cookies linked to session IDs → allow re-authentication without requiring repeated logins.
+
+Admin users (future) → will be able to search across all chats and generate compliance reports.
+
+Multi-user support → each analyst only sees their own chats, cases, and documents.
+
+Role-based access control (future) → will enforce different privileges for admins vs analysts.
